@@ -1,9 +1,9 @@
 ﻿/*
- * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
+ * Copyright (c) 2016-present The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/ZLMediaKit/ZLMediaKit).
  *
- * Use of this source code is governed by MIT license that can be found in the
+ * Use of this source code is governed by MIT-like license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
  * may be found in the AUTHORS file in the root of the source tree.
  */
@@ -11,7 +11,7 @@
 #include "HttpRequester.h"
 #include "Util/onceToken.h"
 #include "Util/NoticeCenter.h"
-
+#include <memory>
 using namespace std;
 using namespace toolkit;
 
@@ -26,6 +26,17 @@ void HttpRequester::onResponseBody(const char *buf, size_t size) {
 }
 
 void HttpRequester::onResponseCompleted(const SockException &ex) {
+    if (ex && _retry++ < _max_retry) {
+        std::weak_ptr<HttpRequester> weak_self = std::static_pointer_cast<HttpRequester>(shared_from_this());
+        getPoller()->doDelayTask(_retry_delay, [weak_self](){
+            if (auto self = weak_self.lock()) {
+                InfoL << "resend request " << self->getUrl() << " with retry " << self->getRetry();
+                self->sendRequest(self->getUrl());
+            }
+            return 0;
+        });
+        return ;
+    }
     const_cast<Parser &>(response()).setContent(std::move(_res_body));
     if (_on_result) {
         _on_result(ex, response());
@@ -33,8 +44,15 @@ void HttpRequester::onResponseCompleted(const SockException &ex) {
     }
 }
 
+void HttpRequester::setRetry(size_t count, size_t delay) {
+    InfoL << "setRetry max=" << count << ", delay=" << delay;
+    _max_retry = count;
+    _retry_delay = delay;
+}
+
 void HttpRequester::startRequester(const string &url, const HttpRequesterResult &on_result, float timeout_sec) {
     _on_result = on_result;
+    _retry = 0;
     setCompleteTimeout(timeout_sec * 1000);
     sendRequest(url);
 }
@@ -72,6 +90,70 @@ static std::string httpBody() {
     os = "unknow";
 #endif
 
+#if (defined(_WIN32) && !defined(WIN32))
+#define WIN32 _WIN32
+#elif (defined(WIN32) && !defined(_WIN32))
+#define _WIN32 WIN32
+#endif
+
+#if (defined(_WIN32) && !defined(_MSC_VER) && !defined(_WIN64))
+#ifndef __i386__
+#define __i386__
+#endif
+#elif defined(_MSC_VER)
+#if (defined(_M_IX86) && !defined(__i386__))
+#define __i386__
+#endif
+#endif
+
+#ifndef __i386__
+#if (defined(__386__) || defined(__I386__) || _M_IX86)
+#define __i386__
+#endif
+#endif
+
+#if (defined(__i386__) && !defined(__I386__))
+#define __I386__
+#endif
+
+#if (defined(__x86_64__) && !defined(__x86_64))
+#define __x86_64
+#endif
+
+#if (defined(__x86_64) && !defined(__x86_64__))
+#define __x86_64__
+#endif
+
+#if (defined(_M_AMD64)) && (!defined(__amd64__))
+#define __amd64__
+#endif
+
+#if (defined(__amd64) && !defined(__amd64__))
+#define __amd64__
+#endif
+
+#if (defined(__amd64__) && !defined(__amd64))
+#define __amd64
+#endif
+    
+#if (defined(_M_ARM64) && !defined(__arm64__))
+#define __arm64__
+#endif
+
+#if (defined(_M_X64) && !defined(__x86_64__))
+#define __x86_64__
+#endif
+    
+#if (defined(_M_ARM) && !defined(__arm__))
+#define __arm__
+#endif
+
+#if (defined(__i386__) || defined(__amd64__)) && (!defined(__x86__))
+#if !(defined(_MSC_VER) && defined(__amd64__))
+#define __x86__ // MSVC doesn't support inline assembly in x64
+#endif
+#endif
+    
     auto &arch = args["arch"];
 #if defined(__x86_64__) || defined(__amd64__)
     arch = "x86_64";
@@ -169,7 +251,8 @@ static std::string httpBody() {
 
     args["rand_str"] = makeRandStr(32);
     for (auto &pr : mINI::Instance()) {
-        // 只获取转协议相关配置
+        // 只获取转协议相关配置  [AUTO-TRANSLATED:4e1e5840]
+        // Only get the configuration related to protocol conversion
         if (pr.first.find("protocol.") == 0) {
             args[pr.first] = pr.second;
         }
@@ -179,21 +262,25 @@ static std::string httpBody() {
 
 static void sendReport() {
     static HttpRequester::Ptr requester = std::make_shared<HttpRequester>();
-    // 获取一次静态信息，定时上报主要方便统计在线实例个数
+    // 获取一次静态信息，定时上报主要方便统计在线实例个数  [AUTO-TRANSLATED:1612d609]
+    // Get static information once, and report it regularly to facilitate statistics of the number of online instances
     static auto body = httpBody();
 
     requester->setMethod("POST");
     requester->setBody(body);
-    // http超时时间设置为30秒
+    // http超时时间设置为30秒  [AUTO-TRANSLATED:466f9b71]
+    // Set the http timeout to 30 seconds
     requester->startRequester(s_report_url, nullptr, 30);
 }
 
 static toolkit::onceToken s_token([]() {
-    NoticeCenter::Instance().addListener(nullptr, EventPollerPool::kOnStarted, [](EventPollerPool &pool, size_t &size) {
-        // 第一次汇报在程序启动后5分钟
+    NoticeCenter::Instance().addListener(nullptr, "kBroadcastEventPollerPoolStarted", [](EventPollerPoolOnStartedArgs) {
+        // 第一次汇报在程序启动后5分钟  [AUTO-TRANSLATED:02e6c508]
+        // The first report is 5 minutes after the program starts
         pool.getPoller()->doDelayTask(5 * 60 * 1000, []() {
             sendReport();
-            // 后续每一个小时汇报一次
+            // 后续每一个小时汇报一次  [AUTO-TRANSLATED:0322b8aa]
+            // Report every hour afterwards
             return 60 * 60 * 1000;
         });
     });
